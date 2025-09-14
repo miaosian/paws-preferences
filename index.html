@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Paws & Preferences</title>
+  <style>
+    :root{
+      --bg: #0f172a;
+      --card: #111827;
+      --accent: #22d3ee;
+      --like: #10b981;
+      --dislike: #ef4444;
+      --muted: #94a3b8;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; font-family: system-ui, sans-serif;
+      color:white; background: radial-gradient(1200px 800px at 80% -10%, #1e3a8a 0%, transparent 50%),
+                 radial-gradient(800px 600px at -10% 80%, #0ea5e9 0%, transparent 50%),
+                 var(--bg);
+      display:flex; flex-direction:column;
+    }
+    header{padding:16px 20px; display:flex; align-items:center; gap:12px;}
+    header h1{font-size:20px; margin:0; letter-spacing:0.3px}
+    .chip{border:1px solid #1f2937; color:var(--muted); padding:6px 10px; border-radius:999px; font-size:12px}
+
+    main{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;}
+    .stage{position:relative; width:min(520px, 92vw); height:min(70vh, 720px); margin:12px 0; display:flex; flex-direction:column; align-items:center; justify-content:flex-start;}
+    .info-bar{display:flex; flex-direction:column; align-items:center; margin-bottom:12px;}
+    .count{font-weight:600; margin-bottom:6px;}
+    .progress{display:flex; gap:6px; justify-content:center;}
+    .dot{width:8px; height:8px; border-radius:999px; background:#1f2937;}
+    .dot.active{background:#38bdf8}
+
+    .card{position:relative; flex:1; width:100%; border-radius:24px; overflow:hidden; box-shadow:0 30px 60px rgba(0,0,0,.35);
+      background:var(--card); user-select:none; touch-action:none; will-change: transform, opacity;
+      display:flex; align-items:center; justify-content:center;
+    }
+    .card img{width:100%; height:100%; object-fit:cover; filter: contrast(1.05) saturate(1.05)}
+    .labels{position:absolute; top:16px; left:16px; right:16px; display:flex; gap:8px;}
+    .flag{font-weight:800; letter-spacing:1px; border:3px solid; padding:6px 10px; border-radius:12px; backdrop-filter: blur(4px); text-shadow:0 1px 0 rgba(0,0,0,.3);}
+    .flag.like{color: var(--like); border-color: var(--like);}
+    .flag.dislike{color: var(--dislike); border-color: var(--dislike); margin-left:auto}
+
+    .loader{margin-top:10px;}
+    .loader div{width:34px; height:34px; border-radius:999px; border:3px solid #1f2937; border-top-color:#38bdf8; animation:spin 1s linear infinite;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    .summary{ width:min(720px, 96vw); margin:20px auto 40px; display:none;}
+    .summary h2{margin:0 0 6px}
+    .grid{display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:12px}
+    .thumb{position:relative; border-radius:16px; overflow:hidden; background:#0b1220; border:1px solid #172036}
+    .thumb img{width:100%; height:120px; object-fit:cover; display:block}
+    .stat{color:var(--muted); font-size:14px}
+  .feedback{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;opacity:0;transition:opacity 220ms ease}
+.feedback.show{opacity:1}
+.feedback.like{background:linear-gradient(90deg, rgba(16,185,129,.14), rgba(16,185,129,.08))}
+.feedback.dislike{background:linear-gradient(90deg, rgba(239,68,68,.14), rgba(239,68,68,.08))}
+.bubble{display:flex;align-items:center;gap:10px;padding:12px 18px;border-radius:999px;font-weight:800;letter-spacing:1px;border:2px solid;backdrop-filter:blur(8px);text-shadow:0 1px 0 rgba(0,0,0,.25)}
+.feedback.like .bubble{color:var(--like);border-color:var(--like);background:rgba(16,185,129,.12)}
+.feedback.dislike .bubble{color:var(--dislike);border-color:var(--dislike);background:rgba(239,68,68,.12)}
+@keyframes slideInRight{from{transform:translateX(40px);opacity:.6}to{transform:translateX(0);opacity:1}}
+@keyframes slideInLeft{from{transform:translateX(-40px);opacity:.6}to{transform:translateX(0);opacity:1}}
+</style>
+</head>
+<body>
+  <header>
+    <h1>Paws & Preferences</h1>
+    <span class="chip" title="Keyboard: ← Dislike, → Like">←/→ keys</span>
+  </header>
+
+  <main>
+    <div class="stage" id="stage">
+      <div class="info-bar">
+        <div class="count" id="count">0 / 0</div>
+        <div class="progress" id="progress"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Swipe feedback overlay -->
+  <div class="feedback" id="feedback" aria-hidden="true">
+    <div class="bubble" id="feedbackBubble">👍 LIKE</div>
+  </div>
+
+<section class="summary" id="summary">
+    <h2>Summary</h2>
+    <p class="stat"><strong id="likedCount">0</strong> cats liked.</p>
+    <div class="grid" id="likedGrid"></div>
+  </section>
+
+<script>
+(function(){
+  const TOTAL = 15;
+  const stage = document.getElementById('stage');
+  const progress = document.getElementById('progress');
+  const count = document.getElementById('count');
+  const summary = document.getElementById('summary');
+  const likedCountEl = document.getElementById('likedCount');
+  const likedGrid = document.getElementById('likedGrid');
+  const feedback = document.getElementById('feedback');
+  const feedbackBubble = document.getElementById('feedbackBubble');
+
+  let currentCard = null;
+  let currentIndex = 0;
+  let liked = [];
+  let loading = false;
+
+  const rand = () => Math.random().toString(36).slice(2);
+  const catUrl = (i) => `https://cataas.com/cat?unique=${Date.now()}_${i}_${rand()}`;
+
+  (function initProgress(){
+    progress.innerHTML = '';
+    for(let i=0;i<TOTAL;i++){
+      const dot = document.createElement('div');
+      dot.className = 'dot';
+      progress.appendChild(dot);
+    }
+  })();
+
+  updateUI();
+  spawnNextCard();
+  alert("Swipe left to dislike, swipe right to like. Use arrow keys on desktop!");
+
+  async function spawnNextCard(){
+    if(currentIndex >= TOTAL){showSummary();return;}
+    if(loading) return; loading = true;
+
+    const loader = document.createElement('div');
+    loader.className = 'loader';
+    loader.innerHTML = '<div></div>';
+    stage.appendChild(loader);
+
+    const src = await loadCatImage(currentIndex).catch(()=>null);
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.zIndex = 100;
+    card.innerHTML = `
+      ${src ? `<img src="${src}" alt="Cat ${currentIndex+1}" draggable="false" />` : ''}
+      <div class="labels">
+        <span class="flag like" style="opacity:0;">LIKE</span>
+        <span class="flag dislike" style="opacity:0;">NOPE</span>
+      </div>`;
+
+    stage.removeChild(loader);
+    stage.appendChild(card);
+    enableDrag(card, currentIndex);
+    currentCard = card;
+    loading = false;
+    updateUI();
+  }
+
+  function loadCatImage(i){
+    return new Promise((resolve)=>{
+      const src = catUrl(i);
+      const im = new Image();
+      im.onload = ()=> resolve(src);
+      im.onerror = ()=> resolve(src);
+      im.src = src;
+    });
+  }
+
+  function updateUI(){
+    const done = currentIndex >= TOTAL;
+    count.textContent = `${Math.min(currentIndex, TOTAL)} / ${TOTAL}`;
+    [...progress.children].forEach((d, i)=>{d.classList.toggle('active', i < currentIndex)});
+  }
+
+  function showSummary(){
+    likedCountEl.textContent = liked.length.toString();
+    likedGrid.innerHTML = '';
+    liked.forEach(src=>{
+      const t = document.createElement('div');
+      t.className = 'thumb';
+      t.innerHTML = `<img src="${src}" alt="Liked cat" loading="lazy" />`;
+      likedGrid.appendChild(t);
+    });
+    summary.style.display = 'block';
+    stage.style.display = 'none';
+  }
+
+  function enableDrag(card, index){
+    let startX = 0, startY = 0, x = 0, y = 0, dragging = false;
+    const likeFlag = card.querySelector('.flag.like');
+    const nopeFlag = card.querySelector('.flag.dislike');
+
+    const onPointerDown = (e)=>{
+      if(index !== currentIndex) return;
+      dragging = true; card.setPointerCapture(e.pointerId);
+      startX = e.clientX; startY = e.clientY; x = 0; y = 0;
+    };
+    const onPointerMove = (e)=>{
+      if(!dragging || index !== currentIndex) return;
+      x = e.clientX - startX; y = e.clientY - startY;
+      const rot = Math.max(-20, Math.min(20, x/10));
+      card.style.transform = `translate3d(${x}px, ${y}px, 0) rotate(${rot}deg)`;
+      const strength = Math.min(1, Math.abs(x)/120);
+      likeFlag.style.opacity = x>0 ? strength : 0;
+      nopeFlag.style.opacity = x<0 ? strength : 0;
+    };
+    const onPointerUp = ()=>{
+      if(!dragging) return; dragging = false;
+      const threshold = 110;
+      if(Math.abs(x) > threshold){
+        const likedIt = x > 0;
+        showFeedback(likedIt);
+        fling(likedIt);
+      } else {
+        snapBack(card, likeFlag, nopeFlag);
+      }
+    };
+
+    card.addEventListener('pointerdown', onPointerDown);
+    card.addEventListener('pointermove', onPointerMove);
+    card.addEventListener('pointerup', onPointerUp);
+
+    function fling(likedIt){
+      const toX = (likedIt? 1 : -1) * (window.innerWidth + 200);
+      const toRot = (likedIt? 30 : -30);
+      card.style.transition = 'transform 360ms cubic-bezier(.2,.8,.2,1)';
+      card.style.transform = `translate3d(${toX}px, ${y}px, 0) rotate(${toRot}deg)`;
+      likeFlag.style.opacity = 0; nopeFlag.style.opacity = 0;
+      if(likedIt){
+        const img = card.querySelector('img');
+        if(img && img.src) liked.push(img.src);
+      }
+      currentIndex++;
+      setTimeout(()=>{
+        card.remove();
+        spawnNextCard();
+        updateUI();
+      }, 360);
+    }
+  }
+
+  function showFeedback(likedIt){
+    feedback.classList.remove('like','dislike');
+    feedback.classList.add(likedIt ? 'like' : 'dislike', 'show');
+    feedbackBubble.innerHTML = likedIt ? '👍 LIKE' : '👎 DISLIKE';
+    feedbackBubble.style.animation = (likedIt ? 'slideInRight' : 'slideInLeft') + ' 260ms ease both';
+    clearTimeout(showFeedback._t);
+    showFeedback._t = setTimeout(()=>{
+      feedback.classList.remove('show');
+    }, 520);
+  }
+
+  function snapBack(card, likeFlag, nopeFlag){
+    card.style.transition = 'transform 220ms cubic-bezier(.2,.8,.2,1)';
+    card.style.transform = '';
+    likeFlag.style.opacity = 0; nopeFlag.style.opacity = 0;
+    setTimeout(()=>{card.style.transition='';}, 240);
+  }
+
+  window.addEventListener('keydown', (e)=>{
+    if(e.key === 'ArrowRight') programmaticSwipe(true);
+    if(e.key === 'ArrowLeft') programmaticSwipe(false);
+  });
+
+  function programmaticSwipe(likedIt){
+    if(currentIndex >= TOTAL || !currentCard) return;
+    const card = currentCard; 
+    const likeFlag = card.querySelector('.flag.like');
+    const nopeFlag = card.querySelector('.flag.dislike');
+    showFeedback(likedIt);
+    likeFlag.style.opacity = likedIt ? 1 : 0;
+    nopeFlag.style.opacity = likedIt ? 0 : 1;
+    const toX = (likedIt? 1 : -1) * (window.innerWidth + 200);
+    card.style.transition = 'transform 360ms cubic-bezier(.2,.8,.2,1)';
+    card.style.transform = `translate3d(${toX}px, 0, 0) rotate(${likedIt?30:-30}deg)`;
+    if(likedIt){
+      const img = card.querySelector('img');
+      if(img && img.src) liked.push(img.src);
+    }
+    currentIndex++;
+    setTimeout(()=>{ card.remove(); spawnNextCard(); updateUI(); }, 360);
+  }
+})();
+</script>
+</body>
+</html>
